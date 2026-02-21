@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>s3gw – no-complaint review (Compatibility Envelope)</title>
+<style>
+  :root{--bg:#0b0d12;--panel:#111624;--ink:#e9eefb;--muted:#a9b3c9;--line:#2a3554;--accent:#6aa8ff;--warn:#ffcc66;--bad:#ff6b6b;--good:#56d39c;}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial; background:var(--bg); color:var(--ink);} 
+  .wrap{max-width:1100px;margin:0 auto;padding:18px 14px 24px;}
+  h1{font-size:18px;margin:0 0 10px;}
+  .row{display:flex;gap:12px;flex-wrap:wrap;align-items:stretch}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;flex:1 1 380px;min-width:320px}
+  .btns{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 0}
+  button{background:#0f1526;border:1px solid var(--line);color:var(--ink);padding:8px 10px;border-radius:10px;cursor:pointer;font-size:13px}
+  button:hover{border-color:var(--accent)}
+  button.active{border-color:var(--accent);box-shadow:0 0 0 2px rgba(106,168,255,.15) inset}
+  .note{color:var(--muted);font-size:13px;line-height:1.45}
+  svg{width:100%;height:auto;display:block}
+  .node{fill:#0f1526;stroke:var(--line);stroke-width:2}
+  .lab{fill:var(--ink);font-size:12px}
+  .sub{fill:var(--muted);font-size:11px}
+  .edge{stroke:var(--line);stroke-width:2;fill:none;marker-end:url(#arrow)}
+  .hot{stroke:var(--accent)!important}
+  .good{stroke:var(--good)!important}
+  .warn{stroke:var(--warn)!important}
+  .bad{stroke:var(--bad)!important}
+  .tag{font-size:11px;fill:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>s3gw: “文句なし”判定（Compatibility Envelope 内）</h1>
+  <div class="row">
+    <div class="card">
+      <div class="note">ボタンで観点を切替（ハイライト + 注釈）。ステータスはドキュメントにハードコードせず、最終的には <b>zig build test</b> のログが真実。</div>
+      <div class="btns">
+        <button data-mode="scope" class="active">T1 スコープ内</button>
+        <button data-mode="http">T2 HTTP PUT/GET</button>
+        <button data-mode="durable">T3 永続化（再起動）</button>
+        <button data-mode="dst">T4 DST（堅牢性）</button>
+        <button data-mode="out">T5 スコープ外</button>
+      </div>
+      <svg viewBox="0 0 980 520" role="img" aria-label="s3gw architecture diagram">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#2a3554"/>
+          </marker>
+        </defs>
+
+        <!-- nodes -->
+        <rect id="n_client" class="node" x="30" y="60" width="190" height="86" rx="10"/>
+        <text class="lab" x="45" y="88">Client (team)</text>
+        <text class="sub" x="45" y="108">curl / app / dev tools</text>
+
+        <rect id="n_http" class="node" x="270" y="40" width="220" height="126" rx="10"/>
+        <text class="lab" x="285" y="72">HTTP server</text>
+        <text class="sub" x="285" y="92">path-style</text>
+        <text class="sub" x="285" y="112">PUT/GET/HEAD/DELETE</text>
+        <text class="sub" x="285" y="132">ListBuckets / ListObjectsV2</text>
+
+        <rect id="n_handler" class="node" x="540" y="40" width="220" height="126" rx="10"/>
+        <text class="lab" x="555" y="72">S3 subset handler</text>
+        <text class="sub" x="555" y="92">errors → XML</text>
+        <text class="sub" x="555" y="112">413 (max body)</text>
+
+        <rect id="n_store" class="node" x="810" y="40" width="140" height="126" rx="10"/>
+        <text class="lab" x="825" y="72">Store</text>
+        <text class="sub" x="825" y="92">replicas=3</text>
+        <text class="sub" x="825" y="112">WAL/commit</text>
+
+        <rect id="n_rep" class="node" x="640" y="210" width="310" height="120" rx="10"/>
+        <text class="lab" x="655" y="238">In-process replica cluster</text>
+        <text class="sub" x="655" y="258">quorum replication + snapshot resync</text>
+        <text class="sub" x="655" y="278">node0 leader (static)</text>
+
+        <rect id="n_disk" class="node" x="640" y="370" width="310" height="120" rx="10"/>
+        <text class="lab" x="655" y="398">Persistent files</text>
+        <text class="sub" x="655" y="418">node*/wal.bin</text>
+        <text class="sub" x="655" y="438">node*/commit.bin</text>
+        <text class="sub" x="655" y="458">node*/snapshot.bin</text>
+
+        <rect id="n_tests" class="node" x="30" y="240" width="460" height="250" rx="10"/>
+        <text class="lab" x="45" y="268">Tests (source of truth)</text>
+        <text class="sub" x="45" y="292">zig build test --summary all</text>
+        <text class="sub" x="45" y="316">Unit: handler/store errors</text>
+        <text class="sub" x="45" y="340">HTTP E2E: PUT body regression, 413</text>
+        <text class="sub" x="45" y="364">Durability: restart preserves state</text>
+        <text class="sub" x="45" y="388">DST: fault matrix + determinism</text>
+        <text class="sub" x="45" y="412">Prod-store DST: WAL corruption + converge</text>
+
+        <!-- edges -->
+        <path id="e1" class="edge" d="M 220 103 C 245 103, 250 103, 270 103"/>
+        <path id="e2" class="edge" d="M 490 103 C 515 103, 520 103, 540 103"/>
+        <path id="e3" class="edge" d="M 760 103 C 785 103, 790 103, 810 103"/>
+
+        <path id="e4" class="edge" d="M 880 166 C 880 190, 860 200, 820 210"/>
+        <path id="e5" class="edge" d="M 795 330 C 795 350, 795 350, 795 370"/>
+
+        <path id="e6" class="edge" d="M 260 315 C 340 315, 420 315, 540 240"/>
+        <text id="t_scope" class="tag" x="250" y="226">(tests cover declared envelope)</text>
+      </svg>
+    </div>
+
+    <div class="card">
+      <div id="title" style="font-weight:700;margin-bottom:8px">T1 スコープ内（文句なし判定）</div>
+      <div id="desc" class="note"></div>
+      <div class="note" style="margin-top:10px">
+        Docs are referential: <b>README</b> と <b>docs/TEST_MATRIX.md</b> に “宣言スコープ” を置き、
+        真偽は <b>zig build test</b> のログで閉じます（KISS/DRY/YAGNI）。
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const MODES = {
+  scope:{
+    title:'T1 スコープ内（文句なし判定）',
+    desc:'Compatibility Envelope（path-style / HTTP / 16MiB上限 / replicas=3 / WAL/commit）に限れば、ビルド・テスト・HTTP E2E・再起動永続化・DSTが同じコマンドで再現できる状態。\n→ “文句なし”の根拠は docs と logs に参照させる。'
+  },
+  http:{
+    title:'T2 HTTP PUT/GET（回帰で固定）',
+    desc:'HTTPで PUT(bodyあり)/GET/HEAD/DELETE/List を実E2Eで固定。以前のpanic類はE2Eの回帰に組み込み、再発したらテストで落ちる。'
+  },
+  durable:{
+    title:'T3 永続化（再起動）',
+    desc:'WAL/commit/snapshot が data-dir 以下に生成され、再起動しても commit 済み状態が残ることをテストで固定。'
+  },
+  dst:{
+    title:'T4 DST（堅牢性）',
+    desc:'故障注入（drop/delay/dup, crash/recover, WAL corruption 等）を seed で再現し、safety + convergence をオラクルで判定。さらに “本番ストア” 自体に対するvopr-style property testも含む。'
+  },
+  out:{
+    title:'T5 スコープ外（drop-inは別プロダクト）',
+    desc:'TLS/SigV4/multipart/range/strict互換/実ネットワーク分散は Non-goals。ここまで求めるなら、別プロダクトとして要件化→互換テスト→実装が必要。'
+  }
+};
+
+const edges = ['e1','e2','e3','e4','e5','e6'];
+const nodes = ['n_client','n_http','n_handler','n_store','n_rep','n_disk','n_tests'];
+function clear(){
+  for(const id of edges) document.getElementById(id).classList.remove('hot','good','warn','bad');
+  for(const id of nodes) document.getElementById(id).style.stroke = 'var(--line)';
+}
+function highlight(mode){
+  clear();
+  const hot=(id,cls)=>document.getElementById(id).classList.add(cls);
+  const stroke=(id,color)=>document.getElementById(id).style.stroke=color;
+
+  if(mode==='scope'){
+    hot('e1','good'); hot('e2','good'); hot('e3','good'); hot('e6','good');
+    stroke('n_tests','var(--good)'); stroke('n_http','var(--good)'); stroke('n_handler','var(--good)');
+  } else if(mode==='http'){
+    hot('e1','hot'); hot('e2','hot');
+    stroke('n_http','var(--accent)'); stroke('n_handler','var(--accent)'); stroke('n_client','var(--accent)');
+  } else if(mode==='durable'){
+    hot('e3','good'); hot('e4','good'); hot('e5','good');
+    stroke('n_store','var(--good)'); stroke('n_rep','var(--good)'); stroke('n_disk','var(--good)');
+  } else if(mode==='dst'){
+    hot('e6','warn');
+    stroke('n_tests','var(--warn)'); stroke('n_rep','var(--warn)'); stroke('n_disk','var(--warn)');
+  } else if(mode==='out'){
+    stroke('n_http','var(--bad)'); stroke('n_handler','var(--bad)');
+  }
+}
+
+for(const b of document.querySelectorAll('button[data-mode]')){
+  b.addEventListener('click',()=>{
+    for(const x of document.querySelectorAll('button[data-mode]')) x.classList.remove('active');
+    b.classList.add('active');
+    const m=b.dataset.mode;
+    document.getElementById('title').textContent=MODES[m].title;
+    document.getElementById('desc').textContent=MODES[m].desc;
+    highlight(m);
+  });
+}
+// init
+const init='scope';
+document.getElementById('desc').textContent=MODES[init].desc;
+highlight(init);
+</script>
+</body>
+</html>

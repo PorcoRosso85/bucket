@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>urn:app:s3api — Architecture & Transactions</title>
+  <style>
+    :root{
+      --bg:#0b0f17; --panel:#111827; --ink:#e5e7eb; --muted:#94a3b8;
+      --stroke:#334155; --box:#0f172a; --box2:#0b1223;
+      --hi:#f59e0b; --hi2:#60a5fa;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans JP",sans-serif;background:var(--bg);color:var(--ink)}
+    .wrap{display:flex;gap:12px;min-height:100vh;padding:12px}
+    .left{flex:1;min-width:0;background:linear-gradient(180deg,var(--box2),transparent);border:1px solid var(--stroke);border-radius:12px;padding:8px;overflow:hidden}
+    .right{width:360px;max-width:44vw;background:var(--panel);border:1px solid var(--stroke);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:10px}
+    h1{font-size:14px;margin:0 0 6px 0;color:var(--muted);font-weight:600}
+    .tx{display:flex;flex-direction:column;gap:8px}
+    .btn{appearance:none;border:1px solid var(--stroke);background:#0b1223;color:var(--ink);padding:10px 10px;border-radius:10px;text-align:left;cursor:pointer;font-size:13px;line-height:1.15}
+    .btn small{display:block;color:var(--muted);margin-top:6px;font-size:11px}
+    .btn.active{border-color:var(--hi);box-shadow:0 0 0 2px rgba(245,158,11,.15) inset}
+    .note{border-top:1px solid var(--stroke);padding-top:10px}
+    .note h2{font-size:13px;margin:0 0 8px 0}
+    .note p{margin:0;color:var(--ink);font-size:12.5px;line-height:1.5}
+    .hint{color:var(--muted);font-size:11.5px}
+
+    svg{width:100%;height:auto;display:block}
+    .box{fill:var(--box);stroke:var(--stroke);stroke-width:1.2;rx:10;ry:10}
+    .box.external{fill:#0a132a;stroke:#1f3b73;stroke-dasharray:4 3}
+    .label{fill:var(--ink);font-size:12px;font-weight:600}
+    .sub{fill:var(--muted);font-size:10.5px}
+    .edge{stroke:#475569;stroke-width:1.5;fill:none;marker-end:url(#arrow)}
+
+    .dim{opacity:.25}
+    .hi{opacity:1}
+    .hi .box{stroke:var(--hi);stroke-width:2}
+    .hi .edge{stroke:var(--hi);stroke-width:2}
+
+    .hi2 .box{stroke:var(--hi2);stroke-width:2}
+    .hi2 .edge{stroke:var(--hi2);stroke-width:2}
+
+    @media (max-width: 860px){
+      .wrap{flex-direction:column}
+      .right{width:100%;max-width:none}
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="left" aria-label="diagram">
+      <svg viewBox="0 0 1180 680" role="img" aria-label="urn:app:s3api architecture diagram">
+        <defs>
+          <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L10,3 L0,6 Z" fill="#475569"></path>
+          </marker>
+        </defs>
+
+        <!-- External -->
+        <g id="ext_client" class="node">
+          <rect class="box external" x="20" y="40" width="230" height="80" />
+          <text class="label" x="35" y="70">client (curl/aws-cli)</text>
+          <text class="sub" x="35" y="92">S3 path-style / HTTP</text>
+        </g>
+
+        <g id="ext_tls" class="node">
+          <rect class="box external" x="20" y="140" width="230" height="80" />
+          <text class="label" x="35" y="170">(optional) TLS terminator</text>
+          <text class="sub" x="35" y="192">nginx / caddy / envoy</text>
+        </g>
+
+        <g id="ext_std" class="node">
+          <rect class="box external" x="20" y="240" width="230" height="80" />
+          <text class="label" x="35" y="270">Zig stdlib</text>
+          <text class="sub" x="35" y="292">std.Io.net + std.http.Server</text>
+        </g>
+
+        <!-- App -->
+        <g id="urn_entry_main" class="node">
+          <rect class="box" x="290" y="40" width="280" height="80" />
+          <text class="label" x="305" y="70">urn:app:entry:main</text>
+          <text class="sub" x="305" y="92">init allocator/store/io → serve()</text>
+        </g>
+
+        <g id="urn_http_server" class="node">
+          <rect class="box" x="290" y="160" width="280" height="95" />
+          <text class="label" x="305" y="190">urn:app:s3api:http_server</text>
+          <text class="sub" x="305" y="212">listen/accept + HTTP parse + body read</text>
+          <text class="sub" x="305" y="232">call handler + respond</text>
+        </g>
+
+        <g id="urn_handler" class="node">
+          <rect class="box" x="600" y="160" width="280" height="95" />
+          <text class="label" x="615" y="190">urn:app:s3api:handler</text>
+          <text class="sub" x="615" y="212">routing + S3-ish status/xml</text>
+          <text class="sub" x="615" y="232">(bucket/key + query list-type=2)</text>
+        </g>
+
+        <g id="urn_storage" class="node">
+          <rect class="box" x="910" y="160" width="250" height="95" />
+          <text class="label" x="925" y="190">urn:app:s3api:storage_dist</text>
+          <text class="sub" x="925" y="212">durable replicated store</text>
+          <text class="sub" x="925" y="232">WAL/commit per replica (in-proc cluster)</text>
+        </g>
+
+        <g id="urn_xml" class="node">
+          <rect class="box" x="600" y="300" width="280" height="85" />
+          <text class="label" x="615" y="330">urn:app:s3api:xml</text>
+          <text class="sub" x="615" y="352">ListBuckets / ListObjectsV2 / Error XML</text>
+        </g>
+
+        <g id="urn_types" class="node">
+          <rect class="box" x="290" y="300" width="280" height="85" />
+          <text class="label" x="305" y="330">urn:app:s3api:types</text>
+          <text class="sub" x="305" y="352">Response/Header lifetime + deinit</text>
+        </g>
+
+        <g id="urn_tests" class="node">
+          <rect class="box" x="290" y="430" width="280" height="75" />
+          <text class="label" x="305" y="460">urn:app:test:all</text>
+          <text class="sub" x="305" y="482">unit + http_e2e + dist_vopr property tests</text>
+        </g>
+
+        <!-- edges -->
+        <path id="e_client_tls" class="edge" d="M250 80 L275 80" />
+        <path id="e_tls_std" class="edge" d="M250 180 L275 180" />
+        <path id="e_std_http" class="edge" d="M250 280 L275 205" />
+
+        <path id="e_main_http" class="edge" d="M430 120 L430 150" />
+        <path id="e_http_handler" class="edge" d="M570 207 L590 207" />
+        <path id="e_handler_store" class="edge" d="M880 207 L900 207" />
+        <path id="e_handler_xml" class="edge" d="M740 255 L740 292" />
+        <path id="e_handler_types" class="edge" d="M600 207 L520 292" />
+        <path id="e_tests_handler" class="edge" d="M430 505 L430 395" />
+      </svg>
+    </div>
+
+    <aside class="right">
+      <div>
+        <h1>Transactions (click)</h1>
+        <div class="tx">
+          <button class="btn" data-tx="tx_boot" data-nodes="urn_entry_main,urn_http_server" data-edges="e_main_http">
+            Tx: Boot
+            <small>init → serve()</small>
+          </button>
+          <button class="btn" data-tx="tx_put_get" data-nodes="ext_client,urn_http_server,urn_handler,urn_storage,urn_types" data-edges="e_std_http,e_http_handler,e_handler_store,e_handler_types">
+            Tx: PUT → GET object
+            <small>HTTP body → storage → bytes response</small>
+          </button>
+          <button class="btn" data-tx="tx_list" data-nodes="ext_client,urn_http_server,urn_handler,urn_storage,urn_xml,urn_types" data-edges="e_std_http,e_http_handler,e_handler_store,e_handler_xml,e_handler_types">
+            Tx: ListBuckets / ListObjectsV2
+            <small>store list → XML</small>
+          </button>
+          <button class="btn" data-tx="tx_errors" data-nodes="ext_client,urn_http_server,urn_handler,urn_storage,urn_xml,urn_types" data-edges="e_std_http,e_http_handler,e_handler_store,e_handler_xml,e_handler_types">
+            Tx: Error mapping
+            <small>NoSuchBucket / NoSuchKey / BucketNotEmpty</small>
+          </button>
+          <button class="btn" data-tx="tx_tls" data-nodes="ext_client,ext_tls,urn_http_server" data-edges="e_client_tls,e_tls_std,e_std_http">
+            Tx: (optional) TLS termination
+            <small>HTTPS → HTTP to this server</small>
+          </button>
+          <button class="btn" data-tx="tx_tests" data-nodes="urn_tests,urn_handler,urn_storage,urn_xml" data-edges="e_tests_handler,e_handler_store,e_handler_xml">
+            Tx: Tests
+            <small>unit tests drive handler/store/xml</small>
+          </button>
+        </div>
+      </div>
+
+      <div class="note">
+        <h2 id="noteTitle">Click a transaction</h2>
+        <p id="noteBody" class="hint">右のボタンで、関係する URN をハイライトし、注釈が更新されます。</p>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    const notes = {
+      tx_boot: {
+        title: "Tx: Boot",
+        body: "urn:app:entry:main が allocator/store/io を初期化し、urn:app:s3api:http_server を起動します。",
+      },
+      tx_put_get: {
+        title: "Tx: PUT → GET object",
+        body: "http_server が HTTP を受け取り body を読み取り、handler が routing して storage_dist (WAL/commit + quorum) に格納/取得します。応答の Content-Type 等は types/handler が決定します。",
+      },
+      tx_list: {
+        title: "Tx: ListBuckets / ListObjectsV2",
+        body: "handler が storage_dist から一覧を取得し、xml が S3 互換の最小 XML を生成して返します。",
+      },
+      tx_errors: {
+        title: "Tx: Error mapping",
+        body: "storage_dist のエラーを handler が S3 風の XML エラーに変換して返します（例: NoSuchBucket/NoSuchKey/BucketNotEmpty）。",
+      },
+      tx_tls: {
+        title: "Tx: (optional) TLS termination",
+        body: "このサーバは HTTP のみです。必要ならリバースプロキシで TLS を終端し、内部は HTTP で転送します（SigV4 を将来強制する場合はヘッダ保持が重要）。",
+      },
+      tx_tests: {
+        title: "Tx: Tests",
+        body: "unit + HTTP E2E + dist_vopr (property) の3レイヤで最小仕様を固定します。永続化/レプリケーションは storage_dist で実装済みで、vopr-style で故障注入しながら検証します。",
+      },
+    };
+
+    const allNodeIds = Array.from(document.querySelectorAll('g.node')).map(g => g.id);
+    const allEdgeIds = Array.from(document.querySelectorAll('path.edge')).map(p => p.id);
+
+    function setDimAll(dim){
+      for(const id of allNodeIds){
+        const el = document.getElementById(id);
+        if(!el) continue;
+        el.classList.toggle('dim', dim);
+        el.classList.remove('hi','hi2');
+      }
+      for(const id of allEdgeIds){
+        const el = document.getElementById(id);
+        if(!el) continue;
+        el.classList.toggle('dim', dim);
+        el.classList.remove('hi','hi2');
+      }
+    }
+
+    function highlight(nodes, edges){
+      setDimAll(true);
+      for(const id of nodes){
+        const el = document.getElementById(id);
+        if(el){ el.classList.add('hi'); el.classList.remove('dim'); }
+      }
+      for(const id of edges){
+        const el = document.getElementById(id);
+        if(el){ el.classList.add('hi'); el.classList.remove('dim'); }
+      }
+    }
+
+    function activate(btn){
+      document.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+
+      const tx = btn.dataset.tx;
+      const nodes = (btn.dataset.nodes || "").split(',').map(s => s.trim()).filter(Boolean);
+      const edges = (btn.dataset.edges || "").split(',').map(s => s.trim()).filter(Boolean);
+      highlight(nodes, edges);
+
+      const note = notes[tx];
+      document.getElementById('noteTitle').textContent = note ? note.title : tx;
+      document.getElementById('noteBody').textContent = note ? note.body : "";
+    }
+
+    document.querySelectorAll('.btn').forEach(btn => {
+      btn.addEventListener('click', () => activate(btn));
+    });
+
+    // default: show boot
+    const first = document.querySelector('.btn[data-tx="tx_boot"]');
+    if(first) activate(first);
+  </script>
+</body>
+</html>
